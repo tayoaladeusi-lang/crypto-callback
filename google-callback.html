@@ -1,0 +1,183 @@
+<!-- www/google-callback.html (or your Netlify google-callback.html) -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Crypto Intelligence - Google Callback</title>
+  <meta http-equiv="Cache-Control" content="no-store" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <style>
+    body{
+      margin:0; font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background:#06081a; color:#eceaf5; min-height:100vh; display:flex; align-items:center; justify-content:center;
+    }
+    .card{
+      width:min(520px, 92vw);
+      background:#151c45; border:1px solid rgba(124,108,240,.18);
+      border-radius:18px; padding:22px;
+      box-shadow:0 10px 40px rgba(0,0,0,.45);
+    }
+    h1{font-size:18px; margin:0 0 10px 0;}
+    p{margin:8px 0; color:#a3a0c2; line-height:1.5; font-size:14px;}
+    code{
+      display:block; margin-top:10px; padding:10px 12px;
+      background:#0b0f2a; border:1px solid rgba(124,108,240,.18);
+      border-radius:12px; color:#eceaf5; font-size:12px; overflow:auto;
+      white-space:pre-wrap; word-break:break-word;
+    }
+    .small{font-size:12px; color:#6b6790;}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Completing Google Sign-In…</h1>
+    <p id="status">Preparing secure redirect back to the app.</p>
+    <p class="small">If you are not redirected automatically, you can copy the details below and send them to yourself.</p>
+    <code id="debug">Loading…</code>
+  </div>
+
+<script>
+/**
+ * ✅ This callback page runs in the system browser (Netlify / web host).
+ * It extracts OAuth results from:
+ *   - URL query (?code=... or ?error=...)
+ *   - URL hash (#access_token=...&id_token=...)
+ * Then redirects into the Cordova app via your custom scheme:
+ *   com.olutayo.cryptointelligence:/oauth2redirect?...  (single slash after scheme)
+ *
+ * IMPORTANT:
+ * - Works for both "code" flow (response_type=code) and implicit tokens (token id_token).
+ * - Adds helpful debug output (no secrets logged beyond what is already in URL).
+ */
+
+(function () {
+  const APP_SCHEME = "com.olutayo.cryptointelligence";
+  const APP_HOST   = "oauth2redirect"; // matches your customurlscheme ANDROID_HOST
+  const APP_URL_PREFIX = `${APP_SCHEME}:/${APP_HOST}`; // single slash after scheme
+
+  const statusEl = document.getElementById("status");
+  const debugEl  = document.getElementById("debug");
+
+  function setStatus(msg) { statusEl.textContent = msg; }
+
+  function parseParams() {
+    const u = new URL(window.location.href);
+
+    // Query params
+    const q = {};
+    u.searchParams.forEach((v,k)=>{ q[k]=v; });
+
+    // Hash params (implicit flow returns tokens here)
+    const h = {};
+    const hash = (u.hash || "").replace(/^#/, "");
+    if (hash) {
+      const hp = new URLSearchParams(hash);
+      hp.forEach((v,k)=>{ h[k]=v; });
+    }
+
+    return { q, h, href: u.href };
+  }
+
+  function pick(obj, key) {
+    return (obj && Object.prototype.hasOwnProperty.call(obj, key)) ? obj[key] : null;
+  }
+
+  function buildAppRedirect(q, h) {
+    // Prefer query values, then hash values
+    const error = pick(q,"error") || pick(h,"error");
+    const error_description = pick(q,"error_description") || pick(h,"error_description");
+
+    const access_token = pick(q,"access_token") || pick(h,"access_token");
+    const id_token     = pick(q,"id_token")     || pick(h,"id_token");
+    const code         = pick(q,"code")         || pick(h,"code"); // for response_type=code
+    const state        = pick(q,"state")        || pick(h,"state");
+    const scope        = pick(q,"scope")        || pick(h,"scope");
+    const token_type   = pick(q,"token_type")   || pick(h,"token_type");
+    const expires_in   = pick(q,"expires_in")   || pick(h,"expires_in");
+
+    // Build redirect params back to app
+    const params = new URLSearchParams();
+
+    if (error) {
+      params.set("error", error);
+      if (error_description) params.set("error_description", error_description);
+      if (state) params.set("state", state);
+      return `${APP_URL_PREFIX}?${params.toString()}`;
+    }
+
+    // For implicit flow (tokens)
+    if (access_token) params.set("access_token", access_token);
+    if (id_token) params.set("id_token", id_token);
+
+    // For auth code flow
+    if (code) params.set("code", code);
+
+    if (state) params.set("state", state);
+    if (scope) params.set("scope", scope);
+    if (token_type) params.set("token_type", token_type);
+    if (expires_in) params.set("expires_in", expires_in);
+
+    // If nothing found, send a readable error
+    if (![access_token, id_token, code].some(Boolean)) {
+      params.set("error", "missing_token_or_code");
+      params.set("error_description", "No access_token, id_token, or code was found in callback URL.");
+      if (state) params.set("state", state);
+    }
+
+    return `${APP_URL_PREFIX}?${params.toString()}`;
+  }
+
+  function safeDebug(q, h, appUrl) {
+    // Don’t show full tokens plainly; mask them (still helps debugging).
+    function mask(v){
+      if(!v) return "";
+      if(v.length <= 12) return "***";
+      return v.slice(0,6) + "…" + v.slice(-6);
+    }
+
+    const shown = {
+      query: { ...q },
+      hash:  { ...h }
+    };
+
+    // Mask sensitive values
+    ["access_token","id_token","code"].forEach(k=>{
+      if (shown.query[k]) shown.query[k] = mask(shown.query[k]);
+      if (shown.hash[k])  shown.hash[k]  = mask(shown.hash[k]);
+    });
+
+    return [
+      "Callback parsed:",
+      JSON.stringify(shown, null, 2),
+      "",
+      "Redirecting to app:",
+      appUrl.replace(/(access_token=)[^&]+/i, "$1***")
+           .replace(/(id_token=)[^&]+/i, "$1***")
+           .replace(/(code=)[^&]+/i, "$1***")
+    ].join("\n");
+  }
+
+  try {
+    const { q, h } = parseParams();
+    const appUrl = buildAppRedirect(q, h);
+
+    debugEl.textContent = safeDebug(q, h, appUrl);
+
+    // Give the UI a moment to paint (helps on some browsers)
+    setStatus("Redirecting back to the app…");
+    setTimeout(() => {
+      // Use location.replace to avoid back button loops
+      window.location.replace(appUrl);
+    }, 300);
+
+  } catch (e) {
+    console.error(e);
+    setStatus("Callback error. Copy details below and try again.");
+    debugEl.textContent = String(e && e.message ? e.message : e);
+  }
+})();
+</script>
+</body>
+</html>
