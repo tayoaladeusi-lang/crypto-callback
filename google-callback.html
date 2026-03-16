@@ -1,182 +1,144 @@
-<!-- www/google-callback.html (or your Netlify google-callback.html) -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Crypto Intelligence - Google Callback</title>
+  <title>Crypto Intelligence - Google Sign-In</title>
   <meta http-equiv="Cache-Control" content="no-store" />
-  <meta http-equiv="Pragma" content="no-cache" />
-  <meta http-equiv="Expires" content="0" />
   <style>
     body{
-      margin:0; font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      background:#06081a; color:#eceaf5; min-height:100vh; display:flex; align-items:center; justify-content:center;
+      margin:0;font-family:system-ui,-apple-system,sans-serif;
+      background:#06081a;color:#eceaf5;min-height:100vh;
+      display:flex;align-items:center;justify-content:center;
     }
     .card{
-      width:min(520px, 92vw);
-      background:#151c45; border:1px solid rgba(124,108,240,.18);
-      border-radius:18px; padding:22px;
-      box-shadow:0 10px 40px rgba(0,0,0,.45);
+      width:min(480px,92vw);background:#151c45;
+      border:1px solid rgba(124,108,240,.2);border-radius:18px;
+      padding:32px;box-shadow:0 10px 40px rgba(0,0,0,.5);
+      text-align:center;
     }
-    h1{font-size:18px; margin:0 0 10px 0;}
-    p{margin:8px 0; color:#a3a0c2; line-height:1.5; font-size:14px;}
-    code{
-      display:block; margin-top:10px; padding:10px 12px;
-      background:#0b0f2a; border:1px solid rgba(124,108,240,.18);
-      border-radius:12px; color:#eceaf5; font-size:12px; overflow:auto;
-      white-space:pre-wrap; word-break:break-word;
+    .logo{font-size:48px;margin-bottom:16px}
+    h1{font-size:20px;margin:0 0 8px 0;color:#a78bfa}
+    p{color:#a3a0c2;font-size:14px;line-height:1.6;margin:8px 0}
+    .spinner{
+      width:40px;height:40px;border:3px solid rgba(124,108,240,.3);
+      border-top-color:#7c6cf0;border-radius:50%;
+      animation:spin 0.8s linear infinite;margin:20px auto;
     }
-    .small{font-size:12px; color:#6b6790;}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .success{color:#22d3a7;font-weight:600;font-size:16px}
+    .error{color:#f87171;font-size:13px;margin-top:12px}
+    .btn{
+      display:inline-block;margin-top:20px;padding:12px 28px;
+      background:linear-gradient(135deg,#7c6cf0,#60a5fa);
+      border:none;border-radius:12px;color:#fff;
+      font-size:15px;font-weight:600;cursor:pointer;
+      text-decoration:none;
+    }
   </style>
 </head>
 <body>
   <div class="card">
-    <h1>Completing Google Sign-In…</h1>
-    <p id="status">Preparing secure redirect back to the app.</p>
-    <p class="small">If you are not redirected automatically, you can copy the details below and send them to yourself.</p>
-    <code id="debug">Loading…</code>
+    <div class="logo">₿</div>
+    <h1>Crypto Intelligence</h1>
+    <div class="spinner" id="spinner"></div>
+    <p id="status">Completing Google Sign-In...</p>
+    <div id="error" class="error" style="display:none"></div>
+    <a id="returnBtn" class="btn" style="display:none" href="#">Return to App</a>
   </div>
 
 <script>
-/**
- * ✅ This callback page runs in the system browser (Netlify / web host).
- * It extracts OAuth results from:
- *   - URL query (?code=... or ?error=...)
- *   - URL hash (#access_token=...&id_token=...)
- * Then redirects into the Cordova app via your custom scheme:
- *   com.olutayo.cryptointelligence:/oauth2redirect?...  (single slash after scheme)
- *
- * IMPORTANT:
- * - Works for both "code" flow (response_type=code) and implicit tokens (token id_token).
- * - Adds helpful debug output (no secrets logged beyond what is already in URL).
- */
+(function(){
+  var FIREBASE_DB = 'https://mycrypto-intell-def53-default-rtdb.firebaseio.com';
+  var FIREBASE_KEY = 'AIzaSyDsHx7odw9YjY6BMO4Tm9ePr3vYmVNhL_Y';
+  var APP_SCHEME = 'com.olutayo.cryptointelligence';
 
-(function () {
-  const APP_SCHEME = "com.olutayo.cryptointelligence";
-  const APP_HOST   = "oauth2redirect"; // matches your customurlscheme ANDROID_HOST
-  const APP_URL_PREFIX = `${APP_SCHEME}:/${APP_HOST}`; // single slash after scheme
+  var statusEl = document.getElementById('status');
+  var spinnerEl = document.getElementById('spinner');
+  var errorEl = document.getElementById('error');
+  var returnBtn = document.getElementById('returnBtn');
 
-  const statusEl = document.getElementById("status");
-  const debugEl  = document.getElementById("debug");
+  function setStatus(msg){ statusEl.textContent = msg; }
+  function showError(msg){ errorEl.textContent = msg; errorEl.style.display = 'block'; spinnerEl.style.display = 'none'; }
 
-  function setStatus(msg) { statusEl.textContent = msg; }
+  // Parse both hash and query params
+  var url = new URL(window.location.href);
+  var q = {};
+  url.searchParams.forEach(function(v,k){ q[k]=v; });
+  var h = {};
+  var hash = (url.hash||'').replace(/^#/,'');
+  if(hash){ new URLSearchParams(hash).forEach(function(v,k){ h[k]=v; }); }
 
-  function parseParams() {
-    const u = new URL(window.location.href);
+  var state = q.state || h.state;
+  var idToken = q.id_token || h.id_token;
+  var accessToken = q.access_token || h.access_token;
+  var error = q.error || h.error;
 
-    // Query params
-    const q = {};
-    u.searchParams.forEach((v,k)=>{ q[k]=v; });
+  console.log('Callback: state='+state+' id_token='+(!!idToken)+' access_token='+(!!accessToken));
 
-    // Hash params (implicit flow returns tokens here)
-    const h = {};
-    const hash = (u.hash || "").replace(/^#/, "");
-    if (hash) {
-      const hp = new URLSearchParams(hash);
-      hp.forEach((v,k)=>{ h[k]=v; });
-    }
-
-    return { q, h, href: u.href };
+  if(error){
+    showError('Sign-In failed: ' + error);
+    return;
   }
 
-  function pick(obj, key) {
-    return (obj && Object.prototype.hasOwnProperty.call(obj, key)) ? obj[key] : null;
+  if(!state){
+    showError('Missing session ID. Please try signing in again.');
+    return;
   }
 
-  function buildAppRedirect(q, h) {
-    // Prefer query values, then hash values
-    const error = pick(q,"error") || pick(h,"error");
-    const error_description = pick(q,"error_description") || pick(h,"error_description");
-
-    const access_token = pick(q,"access_token") || pick(h,"access_token");
-    const id_token     = pick(q,"id_token")     || pick(h,"id_token");
-    const code         = pick(q,"code")         || pick(h,"code"); // for response_type=code
-    const state        = pick(q,"state")        || pick(h,"state");
-    const scope        = pick(q,"scope")        || pick(h,"scope");
-    const token_type   = pick(q,"token_type")   || pick(h,"token_type");
-    const expires_in   = pick(q,"expires_in")   || pick(h,"expires_in");
-
-    // Build redirect params back to app
-    const params = new URLSearchParams();
-
-    if (error) {
-      params.set("error", error);
-      if (error_description) params.set("error_description", error_description);
-      if (state) params.set("state", state);
-      return `${APP_URL_PREFIX}?${params.toString()}`;
-    }
-
-    // For implicit flow (tokens)
-    if (access_token) params.set("access_token", access_token);
-    if (id_token) params.set("id_token", id_token);
-
-    // For auth code flow
-    if (code) params.set("code", code);
-
-    if (state) params.set("state", state);
-    if (scope) params.set("scope", scope);
-    if (token_type) params.set("token_type", token_type);
-    if (expires_in) params.set("expires_in", expires_in);
-
-    // If nothing found, send a readable error
-    if (![access_token, id_token, code].some(Boolean)) {
-      params.set("error", "missing_token_or_code");
-      params.set("error_description", "No access_token, id_token, or code was found in callback URL.");
-      if (state) params.set("state", state);
-    }
-
-    return `${APP_URL_PREFIX}?${params.toString()}`;
+  if(!idToken && !accessToken){
+    showError('No tokens received from Google. Please try again.');
+    return;
   }
 
-  function safeDebug(q, h, appUrl) {
-    // Don’t show full tokens plainly; mask them (still helps debugging).
-    function mask(v){
-      if(!v) return "";
-      if(v.length <= 12) return "***";
-      return v.slice(0,6) + "…" + v.slice(-6);
-    }
+  setStatus('Sending tokens to app...');
 
-    const shown = {
-      query: { ...q },
-      hash:  { ...h }
-    };
+  // Store tokens in Firebase RTDB under session ID
+  // App is polling this location
+  var data = {};
+  if(idToken) data.id_token = idToken;
+  if(accessToken) data.access_token = accessToken;
+  if(state) data.state = state;
+  data.ts = Date.now();
 
-    // Mask sensitive values
-    ["access_token","id_token","code"].forEach(k=>{
-      if (shown.query[k]) shown.query[k] = mask(shown.query[k]);
-      if (shown.hash[k])  shown.hash[k]  = mask(shown.hash[k]);
-    });
+  var dbUrl = FIREBASE_DB + '/oauth_sessions/' + state + '.json?auth=' + FIREBASE_KEY;
 
-    return [
-      "Callback parsed:",
-      JSON.stringify(shown, null, 2),
-      "",
-      "Redirecting to app:",
-      appUrl.replace(/(access_token=)[^&]+/i, "$1***")
-           .replace(/(id_token=)[^&]+/i, "$1***")
-           .replace(/(code=)[^&]+/i, "$1***")
-    ].join("\n");
-  }
+  // First try: write to Firebase RTDB
+  fetch(dbUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(result){
+    console.log('Firebase write result:', JSON.stringify(result));
+    setStatus('✓ Sign-In complete! Return to the Crypto Intelligence app.');
+    spinnerEl.style.display = 'none';
 
-  try {
-    const { q, h } = parseParams();
-    const appUrl = buildAppRedirect(q, h);
+    // Also try custom URL scheme as backup
+    var appUrl = APP_SCHEME + '://oauth2redirect?id_token=' + encodeURIComponent(idToken||'') +
+                 '&access_token=' + encodeURIComponent(accessToken||'') +
+                 '&state=' + encodeURIComponent(state||'');
+    returnBtn.href = appUrl;
+    returnBtn.style.display = 'inline-block';
+    returnBtn.textContent = 'Return to App →';
 
-    debugEl.textContent = safeDebug(q, h, appUrl);
-
-    // Give the UI a moment to paint (helps on some browsers)
-    setStatus("Redirecting back to the app…");
-    setTimeout(() => {
-      // Use location.replace to avoid back button loops
-      window.location.replace(appUrl);
-    }, 300);
-
-  } catch (e) {
-    console.error(e);
-    setStatus("Callback error. Copy details below and try again.");
-    debugEl.textContent = String(e && e.message ? e.message : e);
-  }
+    // Auto-attempt to return to app
+    setTimeout(function(){
+      window.location.href = appUrl;
+    }, 500);
+  })
+  .catch(function(e){
+    console.error('Firebase write error:', e);
+    showError('Could not sync with app: ' + e.message);
+    // Still try custom scheme
+    var appUrl = APP_SCHEME + '://oauth2redirect?id_token=' + encodeURIComponent(idToken||'') +
+                 '&access_token=' + encodeURIComponent(accessToken||'') +
+                 '&state=' + encodeURIComponent(state||'');
+    returnBtn.href = appUrl;
+    returnBtn.style.display = 'inline-block';
+    returnBtn.textContent = 'Tap here to return to App';
+  });
 })();
 </script>
 </body>
