@@ -50,7 +50,6 @@
 <script>
 (function(){
   var FIREBASE_DB = 'https://mycrypto-intell-def53-default-rtdb.firebaseio.com';
-  var FIREBASE_KEY = 'AIzaSyDsHx7odw9YjY6BMO4Tm9ePr3vYmVNhL_Y';
   var APP_SCHEME = 'com.olutayo.cryptointelligence';
 
   var statusEl = document.getElementById('status');
@@ -101,7 +100,7 @@
   if(state) data.state = state;
   data.ts = Date.now();
 
-  var dbUrl = FIREBASE_DB + '/oauth_sessions/' + state + '.json?auth=' + FIREBASE_KEY;
+  var dbUrl = FIREBASE_DB + '/oauth_sessions/' + state + '.json';
 
   // First try: write to Firebase RTDB
   fetch(dbUrl, {
