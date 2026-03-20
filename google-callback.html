@@ -1,143 +1,114 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Crypto Intelligence - Google Sign-In</title>
-  <meta http-equiv="Cache-Control" content="no-store" />
-  <style>
-    body{
-      margin:0;font-family:system-ui,-apple-system,sans-serif;
-      background:#06081a;color:#eceaf5;min-height:100vh;
-      display:flex;align-items:center;justify-content:center;
-    }
-    .card{
-      width:min(480px,92vw);background:#151c45;
-      border:1px solid rgba(124,108,240,.2);border-radius:18px;
-      padding:32px;box-shadow:0 10px 40px rgba(0,0,0,.5);
-      text-align:center;
-    }
-    .logo{font-size:48px;margin-bottom:16px}
-    h1{font-size:20px;margin:0 0 8px 0;color:#a78bfa}
-    p{color:#a3a0c2;font-size:14px;line-height:1.6;margin:8px 0}
-    .spinner{
-      width:40px;height:40px;border:3px solid rgba(124,108,240,.3);
-      border-top-color:#7c6cf0;border-radius:50%;
-      animation:spin 0.8s linear infinite;margin:20px auto;
-    }
-    @keyframes spin{to{transform:rotate(360deg)}}
-    .success{color:#22d3a7;font-weight:600;font-size:16px}
-    .error{color:#f87171;font-size:13px;margin-top:12px}
-    .btn{
-      display:inline-block;margin-top:20px;padding:12px 28px;
-      background:linear-gradient(135deg,#7c6cf0,#60a5fa);
-      border:none;border-radius:12px;color:#fff;
-      font-size:15px;font-weight:600;cursor:pointer;
-      text-decoration:none;
-    }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Completing Google Sign-In...</title>
+<style>
+body{margin:0;background:#06081a;color:#eceaf5;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center}
+.box{padding:40px;max-width:400px}
+.logo{font-size:2em;margin-bottom:16px}
+h2{font-size:1.1em;font-weight:600;margin-bottom:8px;color:#a78bfa}
+p{font-size:.85em;color:#6b6790;line-height:1.5}
+.spin{width:40px;height:40px;border:3px solid rgba(124,108,240,.2);border-top-color:#7c6cf0;border-radius:50%;animation:s .8s linear infinite;margin:20px auto}
+@keyframes s{to{transform:rotate(360deg)}}
+.err{color:#f87171}
+</style>
 </head>
 <body>
-  <div class="card">
-    <div class="logo">₿</div>
-    <h1>Crypto Intelligence</h1>
-    <div class="spinner" id="spinner"></div>
-    <p id="status">Completing Google Sign-In...</p>
-    <div id="error" class="error" style="display:none"></div>
-    <a id="returnBtn" class="btn" style="display:none" href="#">Return to App</a>
-  </div>
-
+<div class="box">
+  <div class="logo">&#8383;</div>
+  <h2>Crypto Intelligence Pro</h2>
+  <div class="spin" id="spinner"></div>
+  <p id="status">Completing Google Sign-In...</p>
+</div>
 <script>
 (function(){
-  var FIREBASE_DB = 'https://mycrypto-intell-def53-default-rtdb.firebaseio.com';
+  var status = document.getElementById('status');
   var APP_SCHEME = 'com.olutayo.cryptointelligence';
 
-  var statusEl = document.getElementById('status');
-  var spinnerEl = document.getElementById('spinner');
-  var errorEl = document.getElementById('error');
-  var returnBtn = document.getElementById('returnBtn');
+  // ── Collect params from both query string (?) and fragment (#) ──
+  var params = {};
 
-  function setStatus(msg){ statusEl.textContent = msg; }
-  function showError(msg){ errorEl.textContent = msg; errorEl.style.display = 'block'; spinnerEl.style.display = 'none'; }
+  // Query params (for code flow)
+  var qp = new URLSearchParams(window.location.search);
+  qp.forEach(function(v, k){ params[k] = v; });
 
-  // Parse both hash and query params
-  var url = new URL(window.location.href);
-  var q = {};
-  url.searchParams.forEach(function(v,k){ q[k]=v; });
-  var h = {};
-  var hash = (url.hash||'').replace(/^#/,'');
-  if(hash){ new URLSearchParams(hash).forEach(function(v,k){ h[k]=v; }); }
+  // Fragment params (for implicit flow — tokens come here)
+  if(window.location.hash && window.location.hash.length > 1){
+    var fp = new URLSearchParams(window.location.hash.substring(1));
+    fp.forEach(function(v, k){ params[k] = v; });
+  }
 
-  var state = q.state || h.state;
-  var idToken = q.id_token || h.id_token;
-  var accessToken = q.access_token || h.access_token;
-  var error = q.error || h.error;
+  console.log('[Callback] Params:', Object.keys(params));
 
-  console.log('Callback: state='+state+' id_token='+(!!idToken)+' access_token='+(!!accessToken));
-
-  if(error){
-    showError('Sign-In failed: ' + error);
+  // ── Check for errors ──
+  if(params.error){
+    status.innerHTML = '<span class="err">Sign-In cancelled: ' + params.error + '</span>';
+    document.getElementById('spinner').style.display = 'none';
+    setTimeout(function(){ tryRedirect({error: params.error}); }, 500);
     return;
   }
 
-  if(!state){
-    showError('Missing session ID. Please try signing in again.');
+  // ── Must have at least one token or code ──
+  if(!params.code && !params.id_token && !params.access_token){
+    status.innerHTML = '<span class="err">No tokens received from Google.</span>';
+    document.getElementById('spinner').style.display = 'none';
+    // Still try to redirect back to app with error
+    setTimeout(function(){ tryRedirect({error: 'no_tokens'}); }, 1000);
     return;
   }
 
-  if(!idToken && !accessToken){
-    showError('No tokens received from Google. Please try again.');
-    return;
-  }
-
-  setStatus('Sending tokens to app...');
-
-  // Store tokens in Firebase RTDB under session ID
-  // App is polling this location
-  var data = {};
-  if(idToken) data.id_token = idToken;
-  if(accessToken) data.access_token = accessToken;
-  if(state) data.state = state;
-  data.ts = Date.now();
-
-  var dbUrl = FIREBASE_DB + '/oauth_sessions/' + state + '.json';
-
-  // First try: write to Firebase RTDB
-  fetch(dbUrl, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  })
-  .then(function(r){ return r.json(); })
-  .then(function(result){
-    console.log('Firebase write result:', JSON.stringify(result));
-    setStatus('✓ Sign-In complete! Return to the Crypto Intelligence app.');
-    spinnerEl.style.display = 'none';
-
-    // Also try custom URL scheme as backup
-    var appUrl = APP_SCHEME + '://oauth2redirect?id_token=' + encodeURIComponent(idToken||'') +
-                 '&access_token=' + encodeURIComponent(accessToken||'') +
-                 '&state=' + encodeURIComponent(state||'');
-    returnBtn.href = appUrl;
-    returnBtn.style.display = 'inline-block';
-    returnBtn.textContent = 'Return to App →';
-
-    // Auto-attempt to return to app
-    setTimeout(function(){
-      window.location.href = appUrl;
-    }, 500);
-  })
-  .catch(function(e){
-    console.error('Firebase write error:', e);
-    showError('Could not sync with app: ' + e.message);
-    // Still try custom scheme
-    var appUrl = APP_SCHEME + '://oauth2redirect?id_token=' + encodeURIComponent(idToken||'') +
-                 '&access_token=' + encodeURIComponent(accessToken||'') +
-                 '&state=' + encodeURIComponent(state||'');
-    returnBtn.href = appUrl;
-    returnBtn.style.display = 'inline-block';
-    returnBtn.textContent = 'Tap here to return to App';
+  // ── Build redirect URL with all params ──
+  var redirectParams = new URLSearchParams();
+  ['code', 'id_token', 'access_token', 'state', 'token_type', 'expires_in', 'scope'].forEach(function(k){
+    if(params[k]) redirectParams.set(k, params[k]);
   });
+
+  status.textContent = 'Redirecting back to app...';
+
+  // ── Also write to Firebase RTDB as backup (polling fallback) ──
+  if(params.state){
+    try{
+      var fbUrl = 'https://mycrypto-intell-def53-default-rtdb.firebaseio.com/oauth_sessions/' + params.state + '.json';
+      var payload = {};
+      if(params.id_token) payload.id_token = params.id_token;
+      if(params.access_token) payload.access_token = params.access_token;
+      if(params.code) payload.code = params.code;
+      fetch(fbUrl, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      }).catch(function(){});
+    }catch(e){}
+  }
+
+  // ── Redirect to app via custom scheme ──
+  setTimeout(function(){
+    tryRedirect(redirectParams);
+  }, 300);
+
+  function tryRedirect(p){
+    var url = APP_SCHEME + '://oauth2redirect?' + p.toString();
+    console.log('[Callback] Redirecting to:', url.slice(0, 80) + '...');
+
+    // Method 1: Direct location (most reliable on Android)
+    window.location.href = url;
+
+    // Method 2: Fallback via hidden iframe after 1.5s
+    setTimeout(function(){
+      var iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.src = url;
+      document.body.appendChild(iframe);
+    }, 1500);
+
+    // Method 3: Show manual link after 4s if nothing worked
+    setTimeout(function(){
+      status.innerHTML = 'If the app didn\'t open, <a href="' + url + '" style="color:#7c6cf0;text-decoration:underline">tap here to return to Crypto Intelligence</a>';
+      document.getElementById('spinner').style.display = 'none';
+    }, 4000);
+  }
 })();
 </script>
 </body>
